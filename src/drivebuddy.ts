@@ -1,5 +1,5 @@
 import { homedir } from "os";
-import { readFileSync, readdirSync, existsSync, statSync } from "fs";
+import { readFileSync, readdirSync, existsSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { execFileSync } from "child_process";
 import { distance } from "fastest-levenshtein";
@@ -30,6 +30,17 @@ export interface SearchResult {
   driveName: string;
   indexFile: string;
   matchScore: number;
+}
+
+export interface AccessHistory {
+  driveUUID: string;
+  relativePath: string;
+  lastAccessed: number; // Timestamp
+  accessCount: number;
+}
+
+export interface ClickHistory {
+  files: AccessHistory[];
 }
 
 /**
@@ -97,6 +108,111 @@ export function calculateMatchScore(query: string, filename: string): number {
   const similarity = maxLength > 0 ? ((maxLength - dist) / maxLength) * 100 : 0;
 
   return Math.max(0, Math.min(100, similarity));
+}
+
+/**
+ * Gets the path to the click history file
+ */
+function getClickHistoryPath(): string {
+  return join(homedir(), "Library/Application Support/DriveBuddy/click-history.json");
+}
+
+/**
+ * Loads the click history from disk
+ */
+export function loadClickHistory(): ClickHistory {
+  try {
+    const historyPath = getClickHistoryPath();
+    if (!existsSync(historyPath)) {
+      return { files: [] };
+    }
+    const content = readFileSync(historyPath, "utf8");
+    return JSON.parse(content) as ClickHistory;
+  } catch (error) {
+    console.error("Failed to load click history:", error);
+    return { files: [] };
+  }
+}
+
+/**
+ * Saves the click history to disk
+ */
+function saveClickHistory(history: ClickHistory): void {
+  try {
+    const historyPath = getClickHistoryPath();
+    writeFileSync(historyPath, JSON.stringify(history, null, 2), "utf8");
+  } catch (error) {
+    console.error("Failed to save click history:", error);
+  }
+}
+
+/**
+ * Records a file access in the click history
+ */
+export function recordFileAccess(driveUUID: string, relativePath: string): void {
+  const history = loadClickHistory();
+  const now = Date.now();
+
+  // Find existing entry
+  const existingIndex = history.files.findIndex(
+    (f) => f.driveUUID === driveUUID && f.relativePath === relativePath
+  );
+
+  if (existingIndex >= 0) {
+    // Update existing entry
+    history.files[existingIndex].lastAccessed = now;
+    history.files[existingIndex].accessCount++;
+  } else {
+    // Add new entry
+    history.files.push({
+      driveUUID,
+      relativePath,
+      lastAccessed: now,
+      accessCount: 1,
+    });
+  }
+
+  // Keep only the most recent 100 files
+  history.files.sort((a, b) => b.lastAccessed - a.lastAccessed);
+  history.files = history.files.slice(0, 100);
+
+  saveClickHistory(history);
+}
+
+/**
+ * Gets recently accessed files as search results
+ */
+export function getRecentFiles(limit: number = 20): SearchResult[] {
+  const history = loadClickHistory();
+  const driveInfo = loadDriveInfo();
+  const results: SearchResult[] = [];
+
+  // Get the most recent files
+  const recentFiles = history.files
+    .sort((a, b) => b.lastAccessed - a.lastAccessed)
+    .slice(0, limit);
+
+  for (const file of recentFiles) {
+    const drive = driveInfo.get(file.driveUUID);
+    if (!drive) continue;
+
+    // Extract filename from path
+    const pathParts = file.relativePath.split('/');
+    const filename = pathParts[pathParts.length - 1];
+
+    results.push({
+      entry: {
+        name: filename,
+        relativePath: file.relativePath,
+      },
+      driveUUID: file.driveUUID,
+      driveName: drive.name,
+      indexFile: "",
+      matchScore: 100, // Perfect score for recent files
+    });
+  }
+
+  return results;
 }
 
 /**
