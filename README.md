@@ -10,9 +10,14 @@ This Raycast extension integrates with [DriveBuddy](https://drivebuddy.app) to l
 
 - **Offline Search**: Search drives even when disconnected
 - **Fast Results**: Searches pre-built indexes for instant results
-- **Drive Status**: See which drives are currently connected
+- **Fuzzy Matching**: Intelligent search using Levenshtein distance algorithm
+  - Finds files even with typos or partial matches
+  - Prioritizes exact matches and substring matches
+  - Filters out weak matches (score threshold: 60/100)
+- **Smart Sorting**: Results ranked by match quality score
+- **Drive Status**: See which drives are currently connected (color-coded indicators)
 - **Multiple Actions**: Copy paths, open in Finder, view drive info
-- **Smart Sorting**: Prioritizes filename matches over path matches
+- **Clean UI**: Filename as title, directory path as subtitle, drive name right-aligned
 
 ## Requirements
 
@@ -74,6 +79,27 @@ DriveBuddy creates search indexes for your external drives and stores them in:
 ```
 
 This extension reads those JSON indexes to provide fast, offline search capabilities. The indexes are updated by DriveBuddy whenever you connect and scan a drive.
+
+### Fuzzy Matching Algorithm
+
+The extension uses the **Levenshtein distance** algorithm (via `fastest-levenshtein` library) to calculate match scores:
+
+1. **Perfect Match** (100 points): Exact filename match
+2. **Substring Match** (90-100 points): Query is contained in filename
+   - Score weighted by query/filename length ratio
+   - Example: "test" in "test.txt" scores higher than "test" in "my_test_document.txt"
+3. **Fuzzy Match** (0-90 points): Based on edit distance
+   - Calculates minimum character changes needed
+   - Normalized by string length
+   - Only results scoring above 60 are shown
+
+**Examples:**
+- `test` → `test.txt`: 95 ✓
+- `test` → `testing`: 95.7 ✓
+- `test` → `latest`: 96.7 ✓
+- `test` → `trash`: 40 ✗ (filtered out)
+
+Results are sorted by match score (highest first), then by drive name and path alphabetically.
 
 ## Preferences
 

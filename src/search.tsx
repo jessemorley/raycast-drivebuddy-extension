@@ -51,18 +51,20 @@ export default function Command() {
   }, [searchText, preferences.maxResults]);
 
   const getSubtitle = (result: SearchResult): string => {
-    const parts = [result.driveName];
+    // Get the parent directory path (everything except the filename)
+    const pathParts = result.entry.relativePath.split('/');
+    const parentPath = pathParts.slice(0, -1).join('/');
 
-    if (preferences.showDriveStatus) {
-      const mounted = isDriveMounted(result.driveName);
-      parts.push(mounted ? "Connected" : "Offline");
-    }
-
-    return parts.join(" • ");
+    return parentPath || '/';
   };
 
   const getAccessories = (result: SearchResult) => {
     const accessories = [];
+
+    // Add drive name
+    accessories.push({
+      text: result.driveName,
+    });
 
     // Show drive status icon
     if (preferences.showDriveStatus) {

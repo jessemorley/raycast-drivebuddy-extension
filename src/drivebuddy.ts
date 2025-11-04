@@ -2,6 +2,7 @@ import { homedir } from "os";
 import { readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { join } from "path";
 import { execFileSync } from "child_process";
+import { distance } from "fastest-levenshtein";
 
 export interface SearchEntry {
   name: string;
@@ -28,6 +29,7 @@ export interface SearchResult {
   driveUUID: string;
   driveName: string;
   indexFile: string;
+  matchScore: number;
 }
 
 /**
@@ -58,6 +60,43 @@ export function encodeVolumeUUID(uuid: string): string {
 export function cfAbsoluteTimeToDate(cfTime: number): Date {
   const EPOCH_OFFSET = 978307200; // Seconds between 1970 and 2001
   return new Date((cfTime + EPOCH_OFFSET) * 1000);
+}
+
+/**
+ * Calculates a fuzzy match score between a query and a filename using Levenshtein distance
+ * Returns a score from 0-100, where 100 is a perfect match
+ *
+ * Algorithm:
+ * - Compares lowercase versions of both strings
+ * - Uses Levenshtein distance (minimum number of single-character edits)
+ * - Normalizes by the longer string length
+ * - Returns percentage score (100 = perfect match, 0 = completely different)
+ */
+export function calculateMatchScore(query: string, filename: string): number {
+  const lowerQuery = query.toLowerCase();
+  const lowerFilename = filename.toLowerCase();
+
+  // Perfect substring match gets a bonus
+  if (lowerFilename === lowerQuery) {
+    return 100;
+  }
+
+  if (lowerFilename.includes(lowerQuery)) {
+    // Substring match: score based on how much of the filename is the query
+    // e.g., "test" in "test.txt" scores higher than "test" in "my_test_file_document.txt"
+    const ratio = lowerQuery.length / lowerFilename.length;
+    return 90 + (ratio * 10); // Score between 90-100
+  }
+
+  // Calculate Levenshtein distance
+  const dist = distance(lowerQuery, lowerFilename);
+  const maxLength = Math.max(lowerQuery.length, lowerFilename.length);
+
+  // Convert distance to similarity score (0-100)
+  // Lower distance = higher score
+  const similarity = maxLength > 0 ? ((maxLength - dist) / maxLength) * 100 : 0;
+
+  return Math.max(0, Math.min(100, similarity));
 }
 
 /**
@@ -172,13 +211,18 @@ async function streamSearchIndexFile(
               const entry = JSON.parse(currentEntry) as SearchEntry;
 
               if (entry.name && entry.relativePath) {
-                // Search filename only, not parent folder paths
-                if (entry.name.includes(query)) {
+                // Calculate match score for the filename
+                const matchScore = calculateMatchScore(query, entry.name.toLowerCase());
+
+                // Only include results with a good match score (> 60)
+                // This filters out weak fuzzy matches like "test" vs "trash"
+                if (matchScore > 60) {
                   currentResults.push({
                     entry,
                     driveUUID,
                     driveName,
                     indexFile,
+                    matchScore,
                   });
 
                   if (currentResults.length >= maxResults) {
@@ -265,19 +309,19 @@ export async function searchDrivesAsync(query: string, maxResults: number = 100)
     console.error("Failed to search drives:", error);
   }
 
-  // Sort results: prioritize matches in filename over path
+  // Sort results by match score (highest first)
   results.sort((a, b) => {
-    const aNameMatch = a.entry.name.includes(lowerQuery);
-    const bNameMatch = b.entry.name.includes(lowerQuery);
+    // Primary sort: match score (descending)
+    if (b.matchScore !== a.matchScore) {
+      return b.matchScore - a.matchScore;
+    }
 
-    if (aNameMatch && !bNameMatch) return -1;
-    if (!aNameMatch && bNameMatch) return 1;
-
-    // Secondary sort by drive name, then by path
+    // Secondary sort: drive name (alphabetical)
     if (a.driveName !== b.driveName) {
       return a.driveName.localeCompare(b.driveName);
     }
 
+    // Tertiary sort: path (alphabetical)
     return a.entry.relativePath.localeCompare(b.entry.relativePath);
   });
 
@@ -334,12 +378,18 @@ export function searchDrives(query: string, maxResults: number = 100): SearchRes
 
         // Search through entries with early exit
         for (const entry of index.entries) {
-          if (entry.name.includes(lowerQuery) || entry.relativePath.toLowerCase().includes(lowerQuery)) {
+          // Calculate match score for the filename
+          const matchScore = calculateMatchScore(lowerQuery, entry.name.toLowerCase());
+
+          // Only include results with a good match score (> 60)
+          // This filters out weak fuzzy matches like "test" vs "trash"
+          if (matchScore > 60) {
             results.push({
               entry,
               driveUUID: uuid,
               driveName,
               indexFile: file,
+              matchScore,
             });
 
             // Early exit as soon as we have enough results
@@ -356,19 +406,19 @@ export function searchDrives(query: string, maxResults: number = 100): SearchRes
     console.error("Failed to search drives:", error);
   }
 
-  // Sort results: prioritize matches in filename over path
+  // Sort results by match score (highest first)
   results.sort((a, b) => {
-    const aNameMatch = a.entry.name.includes(lowerQuery);
-    const bNameMatch = b.entry.name.includes(lowerQuery);
+    // Primary sort: match score (descending)
+    if (b.matchScore !== a.matchScore) {
+      return b.matchScore - a.matchScore;
+    }
 
-    if (aNameMatch && !bNameMatch) return -1;
-    if (!aNameMatch && bNameMatch) return 1;
-
-    // Secondary sort by drive name, then by path
+    // Secondary sort: drive name (alphabetical)
     if (a.driveName !== b.driveName) {
       return a.driveName.localeCompare(b.driveName);
     }
 
+    // Tertiary sort: path (alphabetical)
     return a.entry.relativePath.localeCompare(b.entry.relativePath);
   });
 
