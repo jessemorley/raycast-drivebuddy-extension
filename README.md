@@ -80,27 +80,6 @@ DriveBuddy creates search indexes for your external drives and stores them in:
 
 This extension reads those JSON indexes to provide fast, offline search capabilities. The indexes are updated by DriveBuddy whenever you connect and scan a drive.
 
-### Fuzzy Matching Algorithm
-
-The extension uses the **Levenshtein distance** algorithm (via `fastest-levenshtein` library) to calculate match scores:
-
-1. **Perfect Match** (100 points): Exact filename match
-2. **Substring Match** (90-100 points): Query is contained in filename
-   - Score weighted by query/filename length ratio
-   - Example: "test" in "test.txt" scores higher than "test" in "my_test_document.txt"
-3. **Fuzzy Match** (0-90 points): Based on edit distance
-   - Calculates minimum character changes needed
-   - Normalized by string length
-   - Only results scoring above 60 are shown
-
-**Examples:**
-- `test` → `test.txt`: 95 ✓
-- `test` → `testing`: 95.7 ✓
-- `test` → `latest`: 96.7 ✓
-- `test` → `trash`: 40 ✗ (filtered out)
-
-Results are sorted by match score (highest first), then by drive name and path alphabetically.
-
 ## Preferences
 
 - **Show Drive Status**: Display connection status for each drive
@@ -134,23 +113,6 @@ Drive metadata is read from:
 - The extension checks for drives in `/Volumes/[DriveName]`
 - If your drive is mounted elsewhere, it may show as offline
 - Try ejecting and reconnecting the drive
-
-## Development
-
-### Building
-```bash
-npm run build
-```
-
-### Linting
-```bash
-npm run lint
-```
-
-### Fix Linting Issues
-```bash
-npm run fix-lint
-```
 
 ## Credits
 
